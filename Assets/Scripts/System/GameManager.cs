@@ -14,7 +14,7 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
-    public enum GameState { Playing, GameOver }
+    public enum GameState { Playing, GameOver, Victory }
 
     [Header("初始状态")]
     [Tooltip("游戏开始时的分数。")]
@@ -28,6 +28,8 @@ public class GameManager : MonoBehaviour
     public event Action<int> OnScoreChanged;
     /// <summary>游戏状态变化时触发,参数为新状态。</summary>
     public event Action<GameState> OnStateChanged;
+    /// <summary>关卡横幅提示:参数为(文本, 显示秒数)。EnemySpawner 在关卡开始/通过时触发,GameHUD 居中显示。</summary>
+    public event Action<string, float> OnBanner;
 
     private void Awake()
     {
@@ -60,9 +62,23 @@ public class GameManager : MonoBehaviour
     /// <summary>玩家死亡时由 PlayerHealth 调用,进入 Game Over。</summary>
     public void OnPlayerDied()
     {
-        if (State == GameState.GameOver) return;
+        if (State != GameState.Playing) return;
         SetState(GameState.GameOver);
         Time.timeScale = 0f;   // 暂停玩法(敌机/子弹/刷怪都用 deltaTime,会停)
+    }
+
+    /// <summary>阶段8:所有关卡清完时由 EnemySpawner 调用,进入通关胜利。</summary>
+    public void OnLevelCleared()
+    {
+        if (State != GameState.Playing) return;
+        SetState(GameState.Victory);
+        Time.timeScale = 0f;   // 暂停玩法,弹出胜利面板
+    }
+
+    /// <summary>显示一条居中的关卡横幅提示(文本 + 持续秒数)。由 EnemySpawner 调用。</summary>
+    public void ShowBanner(string text, float duration)
+    {
+        OnBanner?.Invoke(text, duration);
     }
 
     /// <summary>重新开始:恢复时间并重载当前场景。</summary>
@@ -71,6 +87,17 @@ public class GameManager : MonoBehaviour
         Time.timeScale = 1f;
         Scene scene = SceneManager.GetActiveScene();
         SceneManager.LoadScene(scene.buildIndex);
+    }
+
+    /// <summary>退出游戏。打包后退出应用;编辑器里停止播放。</summary>
+    public void QuitGame()
+    {
+        Time.timeScale = 1f;
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
     private void SetState(GameState newState)

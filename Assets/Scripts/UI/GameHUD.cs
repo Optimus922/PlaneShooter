@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -21,14 +22,20 @@ public class GameHUD : MonoBehaviour
     [SerializeField] private Text scoreText;
     [Tooltip("血量文本。")]
     [SerializeField] private Text healthText;
+    [Tooltip("居中关卡横幅文本(显示「第 X 关」「第 X 关通过」)。可留空。")]
+    [SerializeField] private Text bannerText;
 
     [Header("Game Over 面板")]
-    [Tooltip("结算面板根物体(整体显隐)。")]
+    [Tooltip("结算面板根物体(整体显隐)。GameOver 与 Victory 复用同一面板。")]
     [SerializeField] private GameObject gameOverPanel;
+    [Tooltip("结算面板标题文本(显示「游戏结束」或「通关!」)。可留空。")]
+    [SerializeField] private Text titleText;
     [Tooltip("结算面板上的最终分数文本。")]
     [SerializeField] private Text finalScoreText;
     [Tooltip("重新开始按钮。")]
     [SerializeField] private Button restartButton;
+    [Tooltip("退出游戏按钮。")]
+    [SerializeField] private Button quitButton;
 
     private void Start()
     {
@@ -39,6 +46,7 @@ public class GameHUD : MonoBehaviour
         {
             GameManager.Instance.OnScoreChanged += HandleScoreChanged;
             GameManager.Instance.OnStateChanged += HandleStateChanged;
+            GameManager.Instance.OnBanner += HandleBanner;
             HandleScoreChanged(GameManager.Instance.Score);
             HandleStateChanged(GameManager.Instance.State);
         }
@@ -52,8 +60,14 @@ public class GameHUD : MonoBehaviour
         if (restartButton != null)
             restartButton.onClick.AddListener(OnRestartClicked);
 
+        if (quitButton != null)
+            quitButton.onClick.AddListener(OnQuitClicked);
+
         if (gameOverPanel != null)
             gameOverPanel.SetActive(false);
+
+        if (bannerText != null)
+            bannerText.gameObject.SetActive(false);
     }
 
     private void OnDestroy()
@@ -63,16 +77,38 @@ public class GameHUD : MonoBehaviour
         {
             GameManager.Instance.OnScoreChanged -= HandleScoreChanged;
             GameManager.Instance.OnStateChanged -= HandleStateChanged;
+            GameManager.Instance.OnBanner -= HandleBanner;
         }
         if (playerHealth != null)
             playerHealth.OnHealthChanged -= HandleHealthChanged;
         if (restartButton != null)
             restartButton.onClick.RemoveListener(OnRestartClicked);
+        if (quitButton != null)
+            quitButton.onClick.RemoveListener(OnQuitClicked);
     }
 
     private void HandleScoreChanged(int score)
     {
         if (scoreText != null) scoreText.text = $"分数: {score}";
+    }
+
+    private Coroutine bannerRoutine;
+
+    /// <summary>显示居中关卡横幅:文本 + duration 秒后隐藏。</summary>
+    private void HandleBanner(string text, float duration)
+    {
+        if (bannerText == null) return;
+        if (bannerRoutine != null) StopCoroutine(bannerRoutine);
+        bannerRoutine = StartCoroutine(BannerRoutine(text, duration));
+    }
+
+    private IEnumerator BannerRoutine(string text, float duration)
+    {
+        bannerText.text = text;
+        bannerText.gameObject.SetActive(true);
+        yield return new WaitForSeconds(duration);
+        bannerText.gameObject.SetActive(false);
+        bannerRoutine = null;
     }
 
     private void HandleHealthChanged(int current, int max)
@@ -82,14 +118,28 @@ public class GameHUD : MonoBehaviour
 
     private void HandleStateChanged(GameManager.GameState state)
     {
-        bool over = state == GameManager.GameState.GameOver;
-        if (gameOverPanel != null) gameOverPanel.SetActive(over);
-        if (over && finalScoreText != null && GameManager.Instance != null)
-            finalScoreText.text = $"最终分数\n{GameManager.Instance.Score}";
+        bool gameOver = state == GameManager.GameState.GameOver;
+        bool victory = state == GameManager.GameState.Victory;
+        bool show = gameOver || victory;
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(show);
+
+        if (show && GameManager.Instance != null)
+        {
+            if (titleText != null)
+                titleText.text = victory ? "通关!" : "游戏结束";
+            if (finalScoreText != null)
+                finalScoreText.text = $"最终分数\n{GameManager.Instance.Score}";
+        }
     }
 
     private void OnRestartClicked()
     {
         if (GameManager.Instance != null) GameManager.Instance.Restart();
+    }
+
+    private void OnQuitClicked()
+    {
+        if (GameManager.Instance != null) GameManager.Instance.QuitGame();
     }
 }

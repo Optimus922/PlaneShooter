@@ -49,13 +49,13 @@ public class Bullet : MonoBehaviour
         }
     }
 
-    /// <summary>命中检测：碰到敌机就造成伤害并回收自己。</summary>
+    /// <summary>命中检测:碰到可受击物(敌机/boss炮台)就造成伤害并回收自己。</summary>
     private void OnTriggerEnter2D(Collider2D other)
     {
-        Enemy enemy = other.GetComponent<Enemy>();
-        if (enemy != null)
+        IDamageable target = other.GetComponent<IDamageable>();
+        if (target != null)
         {
-            enemy.TakeDamage(damage);
+            target.TakeDamage(damage);
             if (SfxManager.Instance != null) SfxManager.Instance.PlayHit();
             ReturnToPool();
         }

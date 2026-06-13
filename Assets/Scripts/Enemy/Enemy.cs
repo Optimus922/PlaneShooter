@@ -10,7 +10,7 @@ using UnityEngine.Pool;
 /// - 每次从池取出时血量会重置（OnEnable），避免复用到残血敌机。
 /// - 撞到玩家时通过 OnTriggerEnter2D 检测并通知玩家受伤。
 /// </summary>
-public class Enemy : MonoBehaviour
+public class Enemy : MonoBehaviour, IDamageable
 {
     [Header("移动")]
     [Tooltip("下降速度（单位/秒）。")]
@@ -34,6 +34,10 @@ public class Enemy : MonoBehaviour
     private Camera mainCamera;
     private float bottomLimit;
 
+    // 阶段8:被回收时通知生成器(用于波次存活计数)。spawner 注入。
+    private System.Action<Enemy> onReturned;
+    private bool counted;   // 防止一架敌机被重复计数回收
+
     private void Awake()
     {
         mainCamera = Camera.main;
@@ -43,6 +47,7 @@ public class Enemy : MonoBehaviour
     {
         // 每次从池取出时重置血量与回收边界
         currentHealth = maxHealth;
+        counted = false;
 
         float camHalfHeight = mainCamera.orthographicSize;
         float camCenterY = mainCamera.transform.position.y;
@@ -100,8 +105,21 @@ public class Enemy : MonoBehaviour
         pool = ownerPool;
     }
 
+    /// <summary>阶段8:由 EnemySpawner 注入,敌机离场(击毁/出屏/撞玩家)时回调一次,用于波次存活计数。</summary>
+    public void SetOnReturned(System.Action<Enemy> callback)
+    {
+        onReturned = callback;
+    }
+
     public void ReturnToPool()
     {
+        // 先通知生成器(每架敌机一次),再回收
+        if (!counted)
+        {
+            counted = true;
+            onReturned?.Invoke(this);
+        }
+
         if (pool != null)
         {
             pool.Release(this);

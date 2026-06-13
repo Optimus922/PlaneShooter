@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -9,8 +10,11 @@ using UnityEngine;
 /// - 远景层 scrollSpeed 小、近景层大,自动形成视差纵深感。
 ///
 /// 实现要点:
-/// - 每层用两张相同的 Sprite 首尾相接,持续向下移动;
-///   当上面那张完全移出屏幕下方,就把它"跳"回顶部(leapfrog),实现无缝无限循环。
+/// - 每层用「若干张」相同的 Sprite 首尾相接,持续向下移动;
+///   当最下面那张完全移出屏幕下方,就把它"跳"回当前最高那张的正上方(leapfrog),
+///   实现无缝无限循环。
+/// - 贴图数量按屏幕高度自动计算:保证任意宽高比(尤其是竖屏 1080x1920)都能盖满,
+///   不会出现"上半屏露出空白/纯色背景"的问题。
 /// - 运行时自动按相机宽度缩放,铺满整个屏幕宽度,适配不同分辨率的移动端。
 /// - 背景应放在最低的 Sorting Order,确保在飞机/子弹之下。
 /// </summary>
@@ -32,12 +36,11 @@ public class ScrollingBackground : MonoBehaviour
         public Color tint = Color.white;
 
         // ----- 运行时内部状态 -----
-        [HideInInspector] public Transform tileA;
-        [HideInInspector] public Transform tileB;
-        [HideInInspector] public float tileHeight;   // 单张贴图世界高度
+        [HideInInspector] public List<Transform> tiles = new List<Transform>();
+        [HideInInspector] public float tileHeight;   // 单张贴图缩放后的世界高度
     }
 
-    [Tooltip("背景层,从远到近排列。每层会自动生成两张首尾相接的贴图。")]
+    [Tooltip("背景层,从远到近排列。每层会自动生成若干首尾相接的贴图。")]
     [SerializeField] private Layer[] layers;
 
     [Tooltip("背景使用的 Sorting Layer 名称(留空用 Default)。")]
@@ -59,7 +62,7 @@ public class ScrollingBackground : MonoBehaviour
         }
     }
 
-    /// <summary>为一层创建两张相接的贴图,并缩放铺满屏幕宽度。</summary>
+    /// <summary>为一层创建足够数量的相接贴图,并缩放铺满屏幕宽度。</summary>
     private void SetupLayer(Layer layer)
     {
         if (layer.sprite == null)
@@ -68,16 +71,29 @@ public class ScrollingBackground : MonoBehaviour
             return;
         }
 
-        layer.tileA = CreateTile(layer, "TileA");
-        layer.tileB = CreateTile(layer, "TileB");
+        layer.tiles.Clear();
 
-        // 计算缩放后的世界高度。把 A 的底边对齐屏幕底部,B 接在 A 正上方,
-        // 这样开局就从屏幕底往上铺满(避免下方露空白)。
-        layer.tileHeight = GetScaledHeight(layer.tileA);
+        // 先建一张算出缩放后的高度,再决定需要多少张。
+        Transform first = CreateTile(layer, "Tile0");
+        layer.tileHeight = GetScaledHeight(first);
+        layer.tiles.Add(first);
+
+        // 需要的贴图数:盖满相机高度 + 1 张缓冲(回收时不漏空)。至少 2 张。
+        float camHeight = camHalfHeight * 2f;
+        int count = Mathf.CeilToInt(camHeight / Mathf.Max(layer.tileHeight, 0.0001f)) + 1;
+        count = Mathf.Max(count, 2);
+
+        for (int i = 1; i < count; i++)
+            layer.tiles.Add(CreateTile(layer, $"Tile{i}"));
+
+        // 从屏幕底部往上依次堆叠铺满(开局不露空白)。
         float camBottom = cam.transform.position.y - camHalfHeight;
-        float aCenterY = camBottom + layer.tileHeight * 0.5f;
-        layer.tileA.position = new Vector3(cam.transform.position.x, aCenterY, 0f);
-        layer.tileB.position = new Vector3(cam.transform.position.x, aCenterY + layer.tileHeight, 0f);
+        float camX = cam.transform.position.x;
+        for (int i = 0; i < layer.tiles.Count; i++)
+        {
+            float centerY = camBottom + layer.tileHeight * (i + 0.5f);
+            layer.tiles[i].position = new Vector3(camX, centerY, 0f);
+        }
     }
 
     /// <summary>创建一张贴图 GameObject,缩放到铺满屏幕宽度。</summary>
@@ -95,12 +111,10 @@ public class ScrollingBackground : MonoBehaviour
 
         // 缩放:让贴图宽度 >= 屏幕宽度(等比放大,避免两侧露空)
         float spriteWidth = sr.sprite.bounds.size.x;
-        float spriteHeight = sr.sprite.bounds.size.y;
         float screenWidth = camHalfWidth * 2f;
         if (spriteWidth > 0f)
         {
             float scale = screenWidth / spriteWidth;
-            // 至少铺满宽度;若高度因此不足一屏也无妨(两张相接覆盖)
             go.transform.localScale = new Vector3(scale, scale, 1f);
         }
         return go.transform;
@@ -117,40 +131,41 @@ public class ScrollingBackground : MonoBehaviour
         float dt = Time.deltaTime;
         foreach (var layer in layers)
         {
-            if (layer.tileA == null || layer.tileB == null) continue;
+            if (layer.tiles == null || layer.tiles.Count == 0) continue;
             ScrollLayer(layer, dt);
         }
     }
 
-    /// <summary>向下滚动一层,并在贴图移出屏幕底部后跳回顶部。</summary>
+    /// <summary>向下滚动一层,并在贴图移出屏幕底部后跳回最高一张的正上方。</summary>
     private void ScrollLayer(Layer layer, float dt)
     {
         Vector3 delta = Vector3.down * layer.scrollSpeed * dt;
-        layer.tileA.localPosition += delta;
-        layer.tileB.localPosition += delta;
+        foreach (var tile in layer.tiles)
+            tile.position += delta;
 
-        // 谁在下面、谁在上面由实际 y 决定(两张轮流领先)
-        RecycleIfBelow(layer, layer.tileA, layer.tileB);
-        RecycleIfBelow(layer, layer.tileB, layer.tileA);
-    }
-
-    /// <summary>
-    /// 若 tile 已整体移到屏幕下方(顶边都低于相机底),
-    /// 就把它移到 other 的正上方,实现无缝循环。
-    /// </summary>
-    private void RecycleIfBelow(Layer layer, Transform tile, Transform other)
-    {
-        // tile 顶边的世界 y(本物体在父物体下,父物体一般在原点)
-        float tileTopY = tile.position.y + layer.tileHeight * 0.5f;
         float camBottom = cam.transform.position.y - camHalfHeight;
 
-        if (tileTopY < camBottom)
+        // 把所有"整体移到屏幕下方"的贴图,接到当前最高那张的正上方。
+        foreach (var tile in layer.tiles)
         {
-            // 跳到另一张的正上方
-            tile.position = new Vector3(
-                tile.position.x,
-                other.position.y + layer.tileHeight,
-                tile.position.z);
+            float tileTopY = tile.position.y + layer.tileHeight * 0.5f;
+            if (tileTopY < camBottom)
+            {
+                float highestCenterY = GetHighestCenterY(layer);
+                tile.position = new Vector3(
+                    tile.position.x,
+                    highestCenterY + layer.tileHeight,
+                    tile.position.z);
+            }
         }
+    }
+
+    /// <summary>返回该层当前所有贴图里最高的那张的中心 Y。</summary>
+    private float GetHighestCenterY(Layer layer)
+    {
+        float maxY = float.NegativeInfinity;
+        foreach (var tile in layer.tiles)
+            if (tile.position.y > maxY) maxY = tile.position.y;
+        return maxY;
     }
 }

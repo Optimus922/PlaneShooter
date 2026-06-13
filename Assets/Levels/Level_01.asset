@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f8cadbfd562646239fe666b9f1a348c3, type: 3}
+  m_Name: Level_01
+  m_EditorClassIdentifier:
+  levelName: Level 1
+  waves:
+  - enemyCount: 4
+    spawnInterval: 0.9
+    delayAfterClear: 1.5
+    enemyOverride: {fileID: 0}
+  - enemyCount: 6
+    spawnInterval: 0.75
+    delayAfterClear: 1.5
+    enemyOverride: {fileID: 0}
+  - enemyCount: 8
+    spawnInterval: 0.6
+    delayAfterClear: 2
+    enemyOverride: {fileID: 0}
+  - enemyCount: 10
+    spawnInterval: 0.5
+    delayAfterClear: 0
+    enemyOverride: {fileID: 0}
+  bossPrefab: {fileID: 3002000000000000001, guid: 859e0016b4ac41729e560d9c5b5486b0, type: 3}
