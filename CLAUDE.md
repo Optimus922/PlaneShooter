@@ -1,13 +1,20 @@
 # PlaneShooter — 项目说明 / 进展记录
 
 > 本文件用于在 AI 助手记忆丢失(如重装/换机器)时快速恢复项目上下文。请持续维护,把重要进展、决策、改动写进来。仅本地保存,不强制提交 git。
-> 最近更新:2026-06-13(第1关坦克 boss + 可受击部位系统)
+> 最近更新:2026-06-13(boss 子弹调速+闪烁;尺寸调小;主炮节奏循环)
 
 ## ⚠️ 助手工作约定(最高优先级,务必遵守)
 
 - **本文件是跨机器的记忆载体。** 所有重要的更新、改动、技术决策,以及与用户交谈中产生的重要内容/约定,都必须及时写进这份 CLAUDE.md,以便换机器或记忆丢失后能完整唤回上下文。
 - 不要只把进展留在对话里 —— 对话会丢,文件不会。完成一个子任务、做出非显而易见的决策、踩到坑并解决、或用户表达了偏好时,就更新本文件。
 - 每次有实质改动后,顺手更新顶部"最近更新"日期。
+
+### Git 工作流(用户偏好,务必遵守)
+
+- **改完代码不要自动 `git commit`** —— 停在工作区改动状态,等用户明确说"提交/commit"再提交。
+- 提交后可以用一句话**提醒**用户 push,但**不要替用户 push**(助手所在沙箱的网络代理拦截了对 github.com 的外连,`403 from proxy`,读写远程都不行;push 由用户在本地执行,凭证存在用户 MacBook 钥匙串)。
+- 提交时沿用仓库既有作者身份(huoeric / huoeric@gmail.com),用 per-command 环境变量设置,**不要改动 git config**。
+- 远程:`origin` = github.com/Optimus922/PlaneShooter,直接推 `main`(单人项目,用户已用 PAT + osxkeychain 记住凭证)。
 
 ## 项目概览
 
@@ -49,6 +56,7 @@
 ## 美术资源(`Assets/Sprites/`)
 
 - 4 张 sprite:`player_ship`(256²)、`enemy_ship`(256²)、`player_bullet`(64×128)、`enemy_bullet`(64²),透明背景。
+- **尺寸(2026-06-13 调小):** 玩家飞机和普通敌机嫌太大,缩放各减半 —— 玩家 Transform scale `0.8,1`→`0.4,0.5`(在场景 SampleScene)、敌机 prefab scale `0.8,0.8`→`0.4,0.4`。原因:画面占比过大、boss 扇形弹幕难躲。改的是 Transform 缩放,非贴图。
 - **风格:科幻霓虹**(2026-06-12 由扁平低多边形升级而来)。玩家机青/蓝霓虹+引擎喷焰,敌机品红 V 形+红色能量核心,子弹为发光能量束/能量球。暗色/星空背景下最出彩。
 - 生成方式:Pillow 程序化绘制,脚本在项目根 `outputs_tmp_neon/`(`neon_common.py` + `gen_ships.py` + `gen_bullets.py`,4x 超采样)。要再生成/调整风格时复用这些脚本。
 - 旧的扁平风原图备份在 `Sprites/_backup_flat/`,可回退。
@@ -153,9 +161,10 @@
 - **需求:** 每关一个 boss(第1关坦克、第2关飞机、第3关人形机器人,后两个之后再设计)。坦克有 1 主炮 + 2 副炮,**只有炮台能被击中**(本体不可受击),主炮血50、副炮血20,全部击破算 boss 死。设计决策(与用户确认):**波次清完后 boss 出场、boss 会向玩家开火、炮台头顶有血条、撞本体不扣血、主副炮独立(打哪个都行)**。
 - **可受击接口 `Enemy/IDamageable.cs`**(GUID `a4e45a81b38a047a182c4a6e175b0710`):`void TakeDamage(int)`。**Bullet 命中改为找 `IDamageable`** 而非具体 `Enemy`(`Enemy` 现在 implements 它),这样普通敌机和 boss 炮台共用同一套命中逻辑。
 - **`Enemy/BossPart.cs`**(GUID `474e3e55cb30b4e6ca5a471591b1bfa8`):炮台部位,implements IDamageable。被击中闪白、血量归零爆炸+隐藏+停用碰撞体并回调 boss。**头顶世界空间血条用运行时构建的 1x1 白 SpriteRenderer**(底+填充,缩放 FillAnchor.x 裁切,不依赖贴图资源)。主炮/副炮共用此脚本,血量/血条尺寸/颜色 Inspector 配。
-- **`Enemy/EnemyBullet.cs`**(GUID `fe772fb7ed3e47c2bd471c5ca18ad667`):敌方子弹,对象池,`Launch(dir)` 设方向,命中 `PlayerHealth` 扣血,出屏回收。放在 **Enemy 层(8)**(与 Player 层6碰撞已启用)。预制体 `Assets/Prefabs/EnemyBullet.prefab`(GUID `1d5a5b0dc19049599575135a24e8e3fe`,复用 enemy_bullet 贴图染红、触发碰撞体、Kinematic 刚体)。
-- **`Enemy/TankBoss.cs`**(GUID `b470770a1bd14e0e8122760b99400c8f`):本体。进场→上半屏左右徘徊→每个存活炮台按 `fireInterval` 朝玩家发 EnemyBullet(自带子弹对象池)。`parts[]` 全击破→`Defeat()`(计分500+多处爆炸+`onDefeated` 回调)。`Init(callback)` 由 spawner 注入。本体不挂可受击碰撞体→只有炮台能打。
-- **美术:** `gen_tank.py`(在 outputs_tmp_neon/)程序化生成 3 件:`tank_body.png`(军绿履带车体,GUID `f5162c79e52a48d1b67b4dd8cb70bb55`)、`tank_main_gun.png`(红霓虹大炮塔,GUID `736e8a8b6a244c78833ac641ecba0e64`)、`tank_sub_gun.png`(青霓虹小炮塔,GUID `45e151642cda48e6aa39149a654abd9f`)。炮塔单独成图、锚点居中,Unity 里作为子物体叠在车体上。
+- **`Enemy/EnemyBullet.cs`**(GUID `fe772fb7ed3e47c2bd471c5ca18ad667`):敌方子弹,对象池,`Launch(dir)` 设方向,命中 `PlayerHealth` 扣血,出屏回收。放在 **Enemy 层(8)**(与 Player 层6碰撞已启用)。预制体 `Assets/Prefabs/EnemyBullet.prefab`(GUID `1d5a5b0dc19049599575135a24e8e3fe`,复用 enemy_bullet 贴图染红、触发碰撞体、Kinematic 刚体)。**(2026-06-13 调整)** 速度 7→4.5(更好躲);挂 `System/SpriteFlash.cs`(GUID `94a17be6bbcb489b9537859ec81d71f1`)做颜色闪烁 —— 原暗红色不易看清,现在在 亮(米黄)↔暗(红) 间脉动(`flashesPerSecond`=4),更醒目。
+- **`System/SpriteFlash.cs`**(GUID `94a17be6bbcb489b9537859ec81d71f1`):通用世界空间 SpriteRenderer 颜色闪烁组件(区别于 UI 用的 UITextFlash)。`unscaledDeltaTime` 驱动 cos 脉动,`OnEnable` 重置相位(对象池复用安全)。可调 `flashesPerSecond`/`brightColor`/`dimColor`。
+- **`Enemy/TankBoss.cs`**(GUID `b470770a1bd14e0e8122760b99400c8f`):本体。进场→上半屏徘徊→开火。`parts[]` 全击破→`Defeat()`(计分500+多处爆炸+`onDefeated` 回调)。`Init(callback)` 由 spawner 注入。本体不挂可受击碰撞体→只有炮台能打。**(2026-06-13 打磨)** 移动从匀速横移改为 **横移+正弦上下起伏**(波浪轨迹,`bobAmplitude`/`bobFrequency`)。**开火:主炮(parts[0])用协程 `MainGunRoutine` 走循环节奏 —— `mainGunSingleShots`(默认3)发单发瞄准、每发隔 `mainGunSingleGap`(0.35s)→ 停 `mainGunPause`(1s)→ 1 次扇形齐射(`mainGunFanCount`=5、`mainGunFanAngle`=50°)→ 停 1s → 循环。副炮(parts[1..])由 `SubGunLoop` 按 `fireInterval` 定时单发瞄准。** 进场完成时启动主炮协程;`defeated`/`IsDead` 守卫防止死后开火。新增 `Rotate(v,deg)` 辅助。新字段在 TankBoss.prefab 已设。
+- **美术(2026-06-13 重做,更写实/有体积):** `gen_tank.py`(在 outputs_tmp_neon/)程序化生成 3 件:`tank_body.png`(军绿车体,GUID `f5162c79e52a48d1b67b4dd8cb70bb55`)、`tank_main_gun.png`(红霓虹炮塔,GUID `736e8a8b6a244c78833ac641ecba0e64`)、`tank_sub_gun.png`(青霓虹炮塔,GUID `45e151642cda48e6aa39149a654abd9f`)。**v2 改进:履带画成一节节踏板块(高光/阴影)、车体加装甲分块+铆钉、炮塔从「正圆顶」改为「六边形装甲炮塔+炮盾+圆筒立体炮管」(`_hexagon`+`_radial_shade` 径向明暗),解决了 v1「几根线条像放大镜」的问题。** 炮塔单独成图、锚点居中,作为子物体叠在车体上。重生成只改 gen_tank.py 重跑即可,png 覆盖同名文件、GUID/.meta 不变。
 - **预制体 `Assets/Prefabs/TankBoss.prefab`**(GUID `859e0016b4ac41729e560d9c5b5486b0`):root(车体 SpriteRenderer + TankBoss 脚本)+ 3 子物体炮台(MainGun y=0.5 血50;SubGunLeft x=-0.95、SubGunRight x=0.95,各血20、scale0.8)。炮台都在 Enemy 层、触发 BoxCollider2D + Kinematic 刚体 + BossPart。fileID 用 3002xxx 段,EnemyBullet 用 3001xxx 段。
 - **`LevelData` 加 `bossPrefab` 字段**;**`EnemySpawner` 波次清完后**若 `level.bossPrefab!=null` 则 `RunBoss`:在屏幕上方生成 boss、`boss.Init(()=>defeated=true)`、等到 defeated 再放「第X关通过」横幅。Level_01.asset 已接坦克 boss(Level_02/03 暂无,留待飞机/机器人设计)。
 - **经验:** 多部位 boss 的"只有某些部件可受击"靠"只给可受击部件挂碰撞体 + IDamageable"实现,本体不挂;命中逻辑解耦成接口后,加新可受击物零成本。Unity 沙箱无编译器,手写预制体后靠 grep 核对 fileID 唯一性、父子引用、脚本/贴图 GUID,实际编译运行需用户在编辑器验证。

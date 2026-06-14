@@ -108,9 +108,16 @@ MonoBehaviour:
   enterSpeed: 3
   wanderSpeed: 2.5
   horizontalPadding: 1.5
+  bobAmplitude: 0.8
+  bobFrequency: 0.5
   enemyBulletPrefab: {fileID: 3001000000000000006, guid: 1d5a5b0dc19049599575135a24e8e3fe, type: 3}
   fireInterval: 1.6
   muzzleOffset: 0.6
+  mainGunFanCount: 5
+  mainGunFanAngle: 50
+  mainGunSingleShots: 3
+  mainGunSingleGap: 0.35
+  mainGunPause: 1
   scoreValue: 500
   bulletPoolDefault: 10
   bulletPoolMax: 40

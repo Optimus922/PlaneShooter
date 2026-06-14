@@ -32,6 +32,10 @@ public class TankBoss : MonoBehaviour
     [SerializeField] private float wanderSpeed = 2.5f;
     [Tooltip("左右两侧留出的边距,避免 boss 出界。")]
     [SerializeField] private float horizontalPadding = 1.5f;
+    [Tooltip("上下起伏的幅度(世界单位,0=不起伏)。")]
+    [SerializeField] private float bobAmplitude = 0.8f;
+    [Tooltip("上下起伏的频率(每秒周期数)。")]
+    [SerializeField] private float bobFrequency = 0.5f;
 
     [Header("开火")]
     [Tooltip("敌方子弹预制体。")]
@@ -40,6 +44,16 @@ public class TankBoss : MonoBehaviour
     [SerializeField] private float fireInterval = 1.6f;
     [Tooltip("炮口相对炮台中心向下的偏移(子弹生成点)。")]
     [SerializeField] private float muzzleOffset = 0.6f;
+    [Tooltip("主炮(parts[0])扇形齐射的子弹数(奇数最佳,1=单发)。")]
+    [SerializeField] private int mainGunFanCount = 5;
+    [Tooltip("主炮扇形齐射的总张角(度)。")]
+    [SerializeField] private float mainGunFanAngle = 50f;
+    [Tooltip("主炮循环里扇形齐射前的单发次数。")]
+    [SerializeField] private int mainGunSingleShots = 3;
+    [Tooltip("主炮单发之间的间隔(秒)。")]
+    [SerializeField] private float mainGunSingleGap = 0.35f;
+    [Tooltip("主炮循环里每个阶段之间的停顿(秒)。")]
+    [SerializeField] private float mainGunPause = 1f;
 
     [Header("击杀奖励")]
     [Tooltip("boss 被击杀给玩家加的分数。")]
@@ -61,6 +75,7 @@ public class TankBoss : MonoBehaviour
 
     private float leftLimit, rightLimit;
     private Transform player;
+    private float bobTime;
 
     private void Awake()
     {
@@ -113,52 +128,109 @@ public class TankBoss : MonoBehaviour
             Vector3 pos = transform.position;
             pos.y = Mathf.MoveTowards(pos.y, hoverY, enterSpeed * Time.deltaTime);
             transform.position = pos;
-            if (Mathf.Approximately(pos.y, hoverY)) entered = true;
+            if (Mathf.Approximately(pos.y, hoverY))
+            {
+                entered = true;
+                StartCoroutine(MainGunRoutine());   // 进场完成后启动主炮循环节奏
+            }
             return;
         }
 
         Wander();
-        FireLoop();
+        SubGunLoop();
     }
 
     private void Wander()
     {
         Vector3 pos = transform.position;
-        pos.x += wanderDir * wanderSpeed * Time.deltaTime;
 
+        // 横向往返
+        pos.x += wanderDir * wanderSpeed * Time.deltaTime;
         if (pos.x <= leftLimit) { pos.x = leftLimit; wanderDir = 1; }
         else if (pos.x >= rightLimit) { pos.x = rightLimit; wanderDir = -1; }
+
+        // 上下起伏:绕 hoverY 做正弦摆动,叠加横移走出波浪轨迹
+        bobTime += Time.deltaTime;
+        pos.y = hoverY + Mathf.Sin(bobTime * bobFrequency * 2f * Mathf.PI) * bobAmplitude;
 
         transform.position = pos;
     }
 
-    private void FireLoop()
+    /// <summary>副炮(parts[1..])定时单发瞄准玩家。主炮的开火由 MainGunRoutine 协程单独控制。</summary>
+    private void SubGunLoop()
     {
         fireTimer -= Time.deltaTime;
         if (fireTimer > 0f) return;
         fireTimer = fireInterval;
 
-        // 每个存活炮台各发一发,朝玩家方向(玩家不存在则向下)
-        foreach (var p in parts)
+        for (int i = 1; i < parts.Length; i++)
         {
+            var p = parts[i];
             if (p == null || p.IsDead) continue;
-            FireFrom(p.transform.position);
+            FireFan(p.transform.position, 1, 0f);
         }
     }
 
-    private void FireFrom(Vector3 turretPos)
+    /// <summary>主炮开火节奏:N 发单发 → 停顿 → 1 次扇形齐射 → 停顿 → 循环。</summary>
+    private System.Collections.IEnumerator MainGunRoutine()
+    {
+        while (!defeated)
+        {
+            BossPart main = (parts != null && parts.Length > 0) ? parts[0] : null;
+
+            // 主炮已被击破则停止该循环(副炮仍照常)
+            if (main == null || main.IsDead) yield break;
+
+            // 阶段一:N 发单发瞄准
+            for (int s = 0; s < Mathf.Max(1, mainGunSingleShots); s++)
+            {
+                if (defeated || main.IsDead) yield break;
+                FireFan(main.transform.position, 1, 0f);
+                yield return new WaitForSeconds(mainGunSingleGap);
+            }
+
+            // 停顿
+            yield return new WaitForSeconds(mainGunPause);
+            if (defeated || main.IsDead) yield break;
+
+            // 阶段二:1 次扇形齐射
+            FireFan(main.transform.position, Mathf.Max(1, mainGunFanCount), mainGunFanAngle);
+
+            // 停顿后再循环
+            yield return new WaitForSeconds(mainGunPause);
+        }
+    }
+
+    /// <summary>从炮口朝玩家方向发射 count 发子弹,在 spreadAngle 总张角内均匀分布。</summary>
+    private void FireFan(Vector3 turretPos, int count, float spreadAngle)
     {
         if (enemyBulletPrefab == null) return;
 
         Vector3 muzzle = turretPos + Vector3.down * muzzleOffset;
-        Vector2 dir = Vector2.down;
+        Vector2 aim = Vector2.down;
         if (player != null)
-            dir = ((Vector2)(player.position - muzzle)).normalized;
+            aim = ((Vector2)(player.position - muzzle)).normalized;
 
-        EnemyBullet b = bulletPool.Get();
-        b.transform.position = muzzle;
-        b.transform.rotation = Quaternion.identity;
-        b.Launch(dir);
+        // 以 aim 为中心,在 [-spread/2, +spread/2] 内均匀取 count 个方向
+        for (int k = 0; k < count; k++)
+        {
+            float t = (count == 1) ? 0.5f : (float)k / (count - 1);
+            float ang = Mathf.Lerp(-spreadAngle * 0.5f, spreadAngle * 0.5f, t);
+            Vector2 dir = Rotate(aim, ang);
+
+            EnemyBullet b = bulletPool.Get();
+            b.transform.position = muzzle;
+            b.transform.rotation = Quaternion.identity;
+            b.Launch(dir);
+        }
+    }
+
+    /// <summary>把二维向量旋转 degrees 度。</summary>
+    private static Vector2 Rotate(Vector2 v, float degrees)
+    {
+        float rad = degrees * Mathf.Deg2Rad;
+        float cos = Mathf.Cos(rad), sin = Mathf.Sin(rad);
+        return new Vector2(v.x * cos - v.y * sin, v.x * sin + v.y * cos);
     }
 
     private void OnPartDestroyed(BossPart part)
